@@ -1071,6 +1071,13 @@ static void on_state_changed_cb(void *user_data, enum pw_stream_state old, enum 
 
 	blog(LOG_INFO, "[pipewire] Stream %p state: \"%s\" (error: %s)", obs_pw_stream->stream,
 	     pw_stream_state_as_string(state), error ? error : "none");
+
+	/* When the stream leaves "streaming" (window closed, connection lost),
+	 * destroy the texture so the renderer shows black instead of a frozen
+	 * last frame until a new session is established. */
+	if (state != PW_STREAM_STATE_STREAMING) {
+		g_clear_pointer(&obs_pw_stream->texture, gs_texture_destroy);
+	}
 }
 
 static const struct pw_stream_events stream_events = {
