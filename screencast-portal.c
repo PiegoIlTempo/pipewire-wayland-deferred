@@ -462,8 +462,12 @@ static gboolean init_screencast_capture(struct screencast_portal_capture *captur
 	 * regardless of RestoreToken. This prevents the portal dialog
 	 * from appearing before the user opens the target window.
 	 * The session is started later from update() when the Lua
-	 * script sets TriggerSession=true after detecting the window
-	 * via kdotool. */
+	 * script writes the IPC trigger after detecting the window
+	 * via kdotool.
+	 *
+	 * Monitoring-only sources (e.g. "Cattura schermo (PipeWire)" set
+	 * to monitor mode) will trigger the portal dialog on first
+	 * update(), but that's the expected OBS behavior. */
 	blog(LOG_INFO,
 	     "[pipewire] Deferring session creation for '%s'",
 	     obs_source_get_name(capture->source));

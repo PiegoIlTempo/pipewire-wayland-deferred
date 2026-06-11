@@ -21,6 +21,12 @@ local INT = 3
 
 local SUFFIXES = { " Video", " Window", " Capture", " Source" }
 
+-- Source names to skip entirely (they are monitor captures, not windows)
+local SKIP_PATTERNS = {
+    "Cattura schermo", "Screen", "Monitor", "Schermo",
+    "Desktop Capture", "Desktop"
+}
+
 -- source_uuid → { triggered = bool, pattern = string }
 local source_state = {}
 
@@ -84,6 +90,24 @@ function tick()
         local st = obs.obs_source_get_settings(s)
         local token = obs.obs_data_get_string(st, "RestoreToken")
         obs.obs_data_release(st)
+
+        -- Monitor-style sources (name contains "Screen", "Monitor", etc.)
+        -- should be triggered immediately, not deferred
+        local is_monitor = false
+        for _, sk in ipairs(SKIP_PATTERNS) do
+            if name:find(sk, 1, true) then
+                is_monitor = true
+                break
+            end
+        end
+        if is_monitor then
+            if not source_state[uuid] then
+                obs.blog(obs.LOG_INFO, "[auto-restore] activating monitor source '" .. name .. "'")
+                write_ipc_trigger(name)
+                source_state[uuid] = { triggered = true, pattern = nil }
+            end
+            goto continue
+        end
 
         if not token or token == "" then
             source_state[uuid] = nil
