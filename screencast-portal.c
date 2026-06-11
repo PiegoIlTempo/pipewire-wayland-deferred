@@ -639,10 +639,11 @@ static void screencast_portal_capture_update(void *data, obs_data_t *settings)
 
 	capture->cursor_visible = obs_data_get_bool(settings, "ShowCursor");
 
-	/* IPC check: se lo script Lua ha scritto un file di trigger per
-	 * questa source, avvia la sessione deferred.
-	 * Il file si chiama /tmp/obs-trigger-<source_name> */
-	if (capture->deferred) {
+	/* IPC trigger: lo script Lua scrive /tmp/obs-trigger-<name>
+	 * quando la finestra target viene rilevata (anche dopo una
+	 * chiusura/riapertura). Ricrea la sessione portal. */
+	bool ipc_triggered = false;
+	{
 		char trigger_path[512];
 		const char *name = obs_source_get_name(capture->source);
 		snprintf(trigger_path, sizeof(trigger_path),
@@ -651,17 +652,37 @@ static void screencast_portal_capture_update(void *data, obs_data_t *settings)
 		if (f) {
 			fclose(f);
 			remove(trigger_path);
-			blog(LOG_INFO,
-			     "[pipewire] IPC trigger for '%s', starting deferred session",
-			     name);
-			capture->deferred = false;
-			bfree(capture->restore_token);
-			capture->restore_token = bstrdup(
-				obs_data_get_string(settings, "RestoreToken"));
-			capture->cancellable = g_cancellable_new();
-			create_session(capture);
-			return;
+			ipc_triggered = true;
 		}
+	}
+
+	if (ipc_triggered) {
+		blog(LOG_INFO,
+		     "[pipewire] IPC trigger for '%s', (re)starting session",
+		     obs_source_get_name(capture->source));
+
+		/* Clean up previous session if any */
+		g_clear_pointer(&capture->obs_pw_stream, obs_pipewire_stream_destroy);
+		g_clear_pointer(&capture->obs_pw, obs_pipewire_destroy);
+		if (capture->session_handle) {
+			g_dbus_connection_call(portal_get_dbus_connection(),
+				"org.freedesktop.portal.Desktop",
+				capture->session_handle,
+				"org.freedesktop.portal.Session", "Close",
+				NULL, NULL, G_DBUS_CALL_FLAGS_NONE, -1,
+				NULL, NULL, NULL);
+			g_clear_pointer(&capture->session_handle, g_free);
+		}
+		g_cancellable_cancel(capture->cancellable);
+		g_clear_object(&capture->cancellable);
+
+		capture->deferred = false;
+		bfree(capture->restore_token);
+		capture->restore_token = bstrdup(
+			obs_data_get_string(settings, "RestoreToken"));
+		capture->cancellable = g_cancellable_new();
+		create_session(capture);
+		return;
 	}
 
 	if (capture->obs_pw_stream)

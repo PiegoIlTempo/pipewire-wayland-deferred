@@ -5,6 +5,10 @@ obs = obslua
 -- RestoreToken, tries to detect the target window via kdotool and write
 -- the IPC trigger file to activate the portal session.
 --
+-- Once activated, keeps monitoring the window. If the window is closed,
+-- marks the source as pending again so it gets re-activated when the
+-- window reopens.
+--
 -- How it works: the script takes the OBS source name and tries matching it
 -- as a kdotool search pattern. It also tries stripping common suffixes
 -- like " Video", " Window", " Capture", " Source" to find a window match.
@@ -13,16 +17,15 @@ obs = obslua
 -- target window title. For example, if the window is called "MyGame",
 -- name the source "MyGame Video" or just "MyGame".
 
-local INT = 3  -- polling interval in seconds
+local INT = 3
 
--- Suffixes to strip from source names to infer window titles
 local SUFFIXES = { " Video", " Window", " Capture", " Source" }
 
--- Cache of sources already triggered, so we don't keep polling them
-local triggered = {}
+-- source_uuid → { triggered = bool, pattern = string }
+local source_state = {}
 
-function is_window_open(name)
-    local escaped = name:gsub("'", "'\\''")
+function is_window_open(pattern)
+    local escaped = pattern:gsub("'", "'\\''")
     local cmd = "kdotool search --name '" .. escaped .. "' 2>/dev/null"
     local f = io.popen(cmd, "r")
     if not f then return false end
@@ -49,7 +52,6 @@ function write_ipc_trigger(source_name)
         f:write("1")
         f:close()
         obs.blog(obs.LOG_INFO, "[auto-restore] wrote IPC trigger for " .. source_name)
-        -- Force update() so the C plugin processes the IPC file immediately
         local srcs = obs.obs_enum_sources()
         if srcs then
             for _, s in ipairs(srcs) do
@@ -75,41 +77,45 @@ function tick()
 
     for _, s in ipairs(srcs) do
         local name = obs.obs_source_get_name(s)
-        local sid = obs.obs_source_get_uuid(s)
+        local uuid = obs.obs_source_get_uuid(s)
 
-        -- Skip if we've already triggered this source
-        if triggered[sid] then goto continue end
+        if obs.obs_source_get_id(s) ~= "pipewire-screen-capture-source" then goto continue end
 
-        -- Skip non-pipewire sources
-        local s_id = obs.obs_source_get_id(s)
-        if s_id ~= "pipewire-screen-capture-source" then goto continue end
-
-        -- Check if it has a RestoreToken (was configured before)
         local st = obs.obs_source_get_settings(s)
         local token = obs.obs_data_get_string(st, "RestoreToken")
+        obs.obs_data_release(st)
+
         if not token or token == "" then
-            obs.obs_data_release(st)
+            source_state[uuid] = nil
             goto continue
         end
 
-        -- Try to find the window via kdotool
+        local state = source_state[uuid]
+
+        if state and state.triggered and state.pattern then
+            -- Source was activated. Check if window is still open.
+            if not is_window_open(state.pattern) then
+                obs.blog(obs.LOG_INFO, "[auto-restore] window closed for '" .. name .. "', will reactivate")
+                source_state[uuid] = { triggered = false, pattern = state.pattern }
+            end
+            goto continue
+        end
+
+        -- Not triggered yet: try to find the window
         local patterns = infer_patterns(name)
-        local found = false
         for _, pattern in ipairs(patterns) do
             if is_window_open(pattern) then
-                obs.blog(obs.LOG_INFO, "[auto-restore] detected '" .. name .. "' via pattern '" .. pattern .. "'")
+                obs.blog(obs.LOG_INFO, "[auto-restore] detected '" .. name .. "' via '" .. pattern .. "'")
                 write_ipc_trigger(name)
-                triggered[sid] = true
-                found = true
-                break
+                source_state[uuid] = { triggered = true, pattern = pattern }
+                goto continue
             end
         end
 
-        if not found then
-            obs.blog(obs.LOG_DEBUG, "[auto-restore] '" .. name .. "' not found yet, will retry")
+        if not state then
+            source_state[uuid] = { triggered = false, pattern = nil }
         end
 
-        obs.obs_data_release(st)
         ::continue::
     end
 
@@ -117,10 +123,10 @@ function tick()
 end
 
 function script_description()
-    return "Auto-detects PipeWire window capture sources and activates deferred portal sessions when target windows appear."
+    return "Auto-detects PipeWire windows and reactivates sources when windows reopen."
 end
 
 function script_load(s)
-    obs.blog(obs.LOG_INFO, "[auto-restore] loaded (auto-detect mode)")
+    obs.blog(obs.LOG_INFO, "[auto-restore] loaded (reopen support)")
     obs.timer_add(tick, INT * 1000)
 end
