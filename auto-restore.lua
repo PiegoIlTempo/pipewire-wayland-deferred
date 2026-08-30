@@ -118,9 +118,22 @@ function tick()
 
         if state and state.triggered and state.pattern then
             -- Source was activated. Check if window is still open.
-            if not is_window_open(state.pattern) then
-                obs.blog(obs.LOG_INFO, "[auto-restore] window closed for '" .. name .. "', will reactivate")
-                source_state[uuid] = { triggered = false, pattern = state.pattern }
+            if is_window_open(state.pattern) then
+                -- Window visible: reset the miss counter if it was counting
+                if state.misses and state.misses > 0 then
+                    source_state[uuid] = { triggered = true, pattern = state.pattern, misses = 0 }
+                end
+            else
+                -- Not visible: count consecutive misses. Only declare the
+                -- window closed after 2 consecutive ticks (~6s) — a single
+                -- kdotool blip must NOT tear down a healthy capture session.
+                local misses = (state.misses or 0) + 1
+                if misses >= 2 then
+                    obs.blog(obs.LOG_INFO, "[auto-restore] window closed for '" .. name .. "' (" .. misses .. " misses), will reactivate")
+                    source_state[uuid] = { triggered = false, pattern = state.pattern }
+                else
+                    source_state[uuid] = { triggered = true, pattern = state.pattern, misses = misses }
+                end
             end
             goto continue
         end
@@ -129,9 +142,16 @@ function tick()
         local patterns = infer_patterns(name)
         for _, pattern in ipairs(patterns) do
             if is_window_open(pattern) then
-                obs.blog(obs.LOG_INFO, "[auto-restore] detected '" .. name .. "' via '" .. pattern .. "'")
-                write_ipc_trigger(name)
-                source_state[uuid] = { triggered = true, pattern = pattern }
+                -- Debounce: il re-detect va confermato per 2 tick consecutivi
+                -- prima di attivare (evita trigger su blip di kdotool).
+                local seen = (state and state.pending_seen) or 0
+                if seen + 1 >= 2 then
+                    obs.blog(obs.LOG_INFO, "[auto-restore] detected '" .. name .. "' via '" .. pattern .. "'")
+                    write_ipc_trigger(name)
+                    source_state[uuid] = { triggered = true, pattern = pattern }
+                else
+                    source_state[uuid] = { triggered = false, pattern = pattern, pending_seen = seen + 1 }
+                end
                 goto continue
             end
         end

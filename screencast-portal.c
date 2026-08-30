@@ -661,6 +661,19 @@ static void screencast_portal_capture_update(void *data, obs_data_t *settings)
 	}
 
 	if (ipc_triggered) {
+		/* Guardia anti falso-positivo: se lo stream sta ancora ricevendo
+		 * frame (state == streaming), il trigger è un falso allarme del
+		 * watcher (es. blip di kdotool) e la sessione sana va preservata.
+		 * La finestra davvero chiusa fa uscire lo stream da "streaming"
+		 * da sola, quindi qui non blocchiamo mai un restart legittimo. */
+		if (capture->obs_pw_stream &&
+		    obs_pipewire_stream_is_streaming(capture->obs_pw_stream)) {
+			blog(LOG_INFO,
+			     "[pipewire] IPC trigger for '%s' ignored: stream still streaming (false positive)",
+			     obs_source_get_name(capture->source));
+			return;
+		}
+
 		blog(LOG_INFO,
 		     "[pipewire] IPC trigger for '%s', (re)starting session",
 		     obs_source_get_name(capture->source));

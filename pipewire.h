@@ -57,6 +57,7 @@ uint32_t obs_pipewire_stream_get_height(obs_pipewire_stream *obs_pw_stream);
 void obs_pipewire_stream_video_render(obs_pipewire_stream *obs_pw_stream, gs_effect_t *effect);
 
 void obs_pipewire_stream_set_cursor_visible(obs_pipewire_stream *obs_pw_stream, bool cursor_visible);
+bool obs_pipewire_stream_is_streaming(obs_pipewire_stream *obs_pw_stream);
 void obs_pipewire_stream_destroy(obs_pipewire_stream *obs_pw_stream);
 
 void obs_pipewire_stream_set_framerate(obs_pipewire_stream *obs_pw_stream, const struct spa_fraction *framerate);

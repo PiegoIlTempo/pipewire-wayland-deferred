@@ -126,6 +126,7 @@ struct _obs_pipewire_stream {
 
 	struct obs_video_info video_info;
 	bool negotiated;
+	bool streaming;
 
 	DARRAY(struct format_info) format_info;
 
@@ -1072,6 +1073,8 @@ static void on_state_changed_cb(void *user_data, enum pw_stream_state old, enum 
 	blog(LOG_INFO, "[pipewire] Stream %p state: \"%s\" (error: %s)", obs_pw_stream->stream,
 	     pw_stream_state_as_string(state), error ? error : "none");
 
+	obs_pw_stream->streaming = (state == PW_STREAM_STATE_STREAMING);
+
 	/* When the stream leaves "streaming" (window closed, connection lost),
 	 * destroy the texture so the renderer shows black instead of a frozen
 	 * last frame until a new session is established. */
@@ -1402,6 +1405,13 @@ void obs_pipewire_stream_video_render(obs_pipewire_stream *obs_pw_stream, gs_eff
 void obs_pipewire_stream_set_cursor_visible(obs_pipewire_stream *obs_pw_stream, bool cursor_visible)
 {
 	obs_pw_stream->cursor.visible = cursor_visible;
+}
+
+bool obs_pipewire_stream_is_streaming(obs_pipewire_stream *obs_pw_stream)
+{
+	if (!obs_pw_stream)
+		return false;
+	return obs_pw_stream->streaming;
 }
 
 void obs_pipewire_stream_destroy(obs_pipewire_stream *obs_pw_stream)
